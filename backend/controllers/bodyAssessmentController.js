@@ -27,15 +27,22 @@ const createAssessment = catchAsync(async (req, res, next) => {
             });
         }
 
-        // Validate member exists in same gym
-        const memberQuery = { _id: memberId, gymId: req.user.gymId, ...(req.user.branchId && { branchId: req.user.branchId }) };
-        if (req.user.branchId) {
-            memberQuery.branchId = req.user.branchId;
+        // Validate member exists
+        const isSuper = req.user.role === 'superadmin' || req.user.role === 'fitpass_admin';
+        const memberQuery = { _id: memberId };
+        if (!isSuper) {
+            memberQuery.gymId = req.user.gymId;
+            if (req.user.branchId) {
+                memberQuery.branchId = req.user.branchId;
+            }
         }
         const member = await Member.findOne(memberQuery);
         if (!member) {
             return res.status(404).json({ success: false, message: 'Member not found' });
         }
+
+        const targetGymId = member.gymId || req.user.gymId;
+        const targetBranchId = req.user.branchId || member.branchId || null;
 
         const assessment = await BodyAssessment.create({
             memberId,
@@ -45,10 +52,10 @@ const createAssessment = catchAsync(async (req, res, next) => {
             bodyFat: Number(bodyFat),
             muscleMass: Number(muscleMass),
             bmr: Number(bmr),
-            inBodyScore: inBodyScore !== undefined ? Number(inBodyScore) : null,
+            inBodyScore: inBodyScore !== undefined && inBodyScore !== '' && inBodyScore !== null ? Number(inBodyScore) : null,
             assessmentDate: assessmentDate ? new Date(assessmentDate) : new Date(),
-            gymId: req.user.gymId, ...(req.user.branchId && { branchId: req.user.branchId }),
-            branchId: req.user.branchId || null
+            gymId: targetGymId,
+            branchId: targetBranchId
         });
 
         res.status(201).json(assessment);

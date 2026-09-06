@@ -16,7 +16,7 @@ import { Pencil, Trash2, TrendingUp, ShieldAlert, Award, Activity, Scale, Percen
 
 const BodyAssessments = () => {
     const { user } = useContext(AuthContext);
-    const isStaff = user?.role === 'admin' || user?.role === 'trainer' || user?.role === 'superadmin';
+    const isStaff = ['admin', 'trainer', 'superadmin', 'h4_admin', 'fitpass_admin'].includes(user?.role);
 
     const [members, setMembers] = useState([]);
     const [selectedMemberId, setSelectedMemberId] = useState('');

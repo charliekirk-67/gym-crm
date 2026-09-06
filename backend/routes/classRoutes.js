@@ -1,6 +1,15 @@
 const express = require('express');
 const router = express.Router();
-const { getClasses, createClass, deleteClass, getClassBookings, adminBookClass, adminCancelBooking } = require('../controllers/classController');
+const { 
+    getClasses, 
+    createClass, 
+    deleteClass, 
+    getClassBookings, 
+    adminBookClass, 
+    adminCancelBooking,
+    verifyClassAttendee,
+    toggleAttendeeStatus
+} = require('../controllers/classController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 const tenantFilter = require('../middleware/tenantFilter');
 const validate = require('../middleware/validate');
@@ -15,7 +24,10 @@ const createClassSchema = z.object({
     startTime: z.string().min(1, 'Start time is required'),
     endTime: z.string().min(1, 'End time is required'),
     maxSeats: z.coerce.number().min(1, 'Capacity must be at least 1'),
-    bookingDeadline: z.string().optional()
+    bookingDeadline: z.string().optional(),
+    branchId: z.string().optional().nullable(),
+    branchIds: z.array(z.string()).optional(),
+    gymId: z.string().optional()
 });
 
 const bookClassSchema = z.object({
@@ -23,12 +35,16 @@ const bookClassSchema = z.object({
 });
 
 router.route('/')
-    .get(protect, authorize('admin', 'trainer', 'receptionist'), tenantFilter, getClasses)
-    .post(protect, authorize('admin', 'trainer'), validate({ body: createClassSchema }), createClass);
+    .get(protect, authorize('superadmin', 'admin', 'trainer', 'receptionist'), tenantFilter, getClasses)
+    .post(protect, authorize('superadmin', 'admin', 'trainer'), validate({ body: createClassSchema }), createClass);
 
-router.delete('/:id', protect, authorize('admin'), deleteClass);
-router.get('/:id/bookings', protect, authorize('admin', 'trainer', 'receptionist'), getClassBookings);
-router.post('/:id/book', protect, authorize('admin', 'trainer', 'receptionist'), validate({ body: bookClassSchema }), adminBookClass);
-router.delete('/:id/bookings/:memberId', protect, authorize('admin', 'trainer', 'receptionist'), adminCancelBooking);
+router.delete('/:id', protect, authorize('superadmin', 'admin'), deleteClass);
+router.get('/:id/bookings', protect, authorize('superadmin', 'admin', 'trainer', 'receptionist'), getClassBookings);
+router.post('/:id/book', protect, authorize('superadmin', 'admin', 'trainer', 'receptionist'), validate({ body: bookClassSchema }), adminBookClass);
+router.delete('/:id/bookings/:memberId', protect, authorize('superadmin', 'admin', 'trainer', 'receptionist'), adminCancelBooking);
+
+// Attendee verification via QR scan or manual roster toggle
+router.post('/:id/verify-attendee', protect, authorize('superadmin', 'admin', 'trainer', 'receptionist'), verifyClassAttendee);
+router.put('/:id/attendees/:memberId', protect, authorize('superadmin', 'admin', 'trainer', 'receptionist'), toggleAttendeeStatus);
 
 module.exports = router;

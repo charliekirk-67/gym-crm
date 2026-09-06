@@ -8,12 +8,17 @@ const { logAudit } = require('../utils/auditLogger');
 // @route   POST /api/payments
 // @access  Private/Admin
 const addPayment = catchAsync(async (req, res, next) => {
-    const { memberId, amount, method, date } = req.body;
+    const { memberId, amount, method, paymentMethod, date } = req.body;
+    const actualMethod = method || paymentMethod || 'Cash';
 
-    // Tenant isolation: the member must belong to the caller's gym.
-    const memberQuery = { _id: memberId, gymId: req.user.gymId, ...(req.user.branchId && { branchId: req.user.branchId }) };
-    if (req.user.branchId) {
-        memberQuery.branchId = req.user.branchId;
+    // Tenant isolation: allow superadmin/fitpass_admin to access all gyms; enforce gymId for branch admins
+    const isSuper = req.user.role === 'superadmin' || req.user.role === 'fitpass_admin';
+    const memberQuery = { _id: memberId };
+    if (!isSuper) {
+        memberQuery.gymId = req.user.gymId;
+        if (req.user.branchId) {
+            memberQuery.branchId = req.user.branchId;
+        }
     }
     const member = await Member.findOne(memberQuery);
     if (!member) {
@@ -21,21 +26,24 @@ const addPayment = catchAsync(async (req, res, next) => {
         throw new Error('Member not found');
     }
 
+    const targetGymId = member.gymId || req.user.gymId;
+    const targetBranchId = req.user.branchId || member.branchId || null;
+
     const payment = await Payment.create({
         memberId,
         amount: Number(amount),
-        method,
+        method: actualMethod,
         date: date ? new Date(date) : new Date(),
-        gymId: req.user.gymId, ...(req.user.branchId && { branchId: req.user.branchId }),
-        branchId: req.user.branchId || member.branchId || null
+        gymId: targetGymId,
+        branchId: targetBranchId
     });
 
     if (payment) {
         // Update member's paidAmount
-        member.paidAmount += Number(amount);
+        member.paidAmount = (member.paidAmount || 0) + Number(amount);
         await member.save();
         await logAudit(req, 'PAYMENT_ADDED', 'Payment', payment._id,
-            `Recorded ${method} payment of ${amount} from ${member.name}`, member.name);
+            `Recorded ${actualMethod} payment of ${amount} from ${member.name}`, member.name);
         res.status(201).json(payment);
     } else {
         res.status(400);

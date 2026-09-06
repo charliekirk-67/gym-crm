@@ -216,6 +216,7 @@ const Staff = () => {
                             <table className="table">
                                 <thead>
                                     <tr>
+                                        <th>Staff ID</th>
                                         <th>Name</th>
                                         <th>Email Address</th>
                                         <th>Role</th>
@@ -225,8 +226,13 @@ const Staff = () => {
                                 </thead>
                                 <tbody>
                                     {filteredStaff.length > 0 ? (
-                                        filteredStaff.map(staff => (
+                                        filteredStaff.map((staff, idx) => (
                                             <tr key={staff._id || staff.id}>
+                                                <td>
+                                                    <span style={{ fontFamily: 'monospace', fontWeight: '700', fontSize: '0.85rem', color: 'var(--primary, #f59e0b)', background: 'rgba(245, 158, 11, 0.08)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
+                                                        {staff.displayId || staff.empid || `EMP${1001 + idx}`}
+                                                    </span>
+                                                </td>
                                                 <td style={{ fontWeight: '600' }}>{staff.name}</td>
                                                 <td>{staff.email}</td>
                                                 <td>

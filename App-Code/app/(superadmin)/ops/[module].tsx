@@ -537,10 +537,21 @@ export default function OpsDetailScreen() {
 
       case 'classes':
         return (
-          <View style={styles.infoRow}>
-            <Typography variant="caption" color="secondary">Trainer: {item.trainerName || 'N/A'}</Typography>
-            <Typography variant="caption" color="secondary">Schedule: {item.startTime} - {item.endTime}</Typography>
-          </View>
+          <>
+            <View style={styles.infoRow}>
+              <Typography variant="caption" color="secondary">Trainer: {item.trainerName || 'N/A'}</Typography>
+              <Typography variant="caption" color="secondary">Schedule: {item.startTime} - {item.endTime}</Typography>
+            </View>
+            <View style={[styles.infoFooter, { marginTop: theme.spacing.xs }]}>
+              <Typography variant="caption" color="primary" style={{ fontWeight: '700' }}>
+                📍 {item.branchName || 'Main Studio'}
+              </Typography>
+              <Badge
+                label={`${(item.bookings || []).filter((b: any) => b.status === 'Attended').length} / ${(item.bookings || []).length} Attended`}
+                variant="info"
+              />
+            </View>
+          </>
         );
 
       case 'assessments':
@@ -680,6 +691,9 @@ export default function OpsDetailScreen() {
             <Input label="Trainer Name *" value={trainerName} onChangeText={setTrainerName} placeholder="e.g. Coach Arun" />
             <Input label="Start Time (HH:MM) *" value={startTime} onChangeText={setStartTime} placeholder="e.g. 06:00" />
             <Input label="End Time (HH:MM) *" value={endTime} onChangeText={setEndTime} placeholder="e.g. 07:00" />
+            {!selectedBranchId && (
+              <Select label="Assign to Branch" options={branchesOptions} value={branchId} onValueChange={(val) => setBranchId(String(val))} placeholder="Select branch (Optional)" />
+            )}
           </>
         );
       case 'assessments':

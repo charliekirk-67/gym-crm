@@ -68,7 +68,9 @@ const createMember = catchAsync(async (req, res, next) => {
         const status = expiryDate < new Date() ? 'Expired' : 'Active';
 
         let targetGymId;
-        if (gymId) {
+        if (req.user.gymId && req.user.gymId !== 'SYSTEM') {
+            targetGymId = req.user.gymId;
+        } else if (gymId) {
             targetGymId = gymId;
         } else if (plan && plan.gymId && plan.gymId !== 'SYSTEM') {
             targetGymId = plan.gymId;
@@ -76,8 +78,6 @@ const createMember = catchAsync(async (req, res, next) => {
             targetGymId = 'SYSTEM';
         } else if (req.tenantFilter && req.tenantFilter.gymId) {
             targetGymId = req.tenantFilter.gymId;
-        } else if (req.user.gymId && req.user.gymId !== 'SYSTEM') {
-            targetGymId = req.user.gymId;
         } else {
             const Gym = require('../models/Gym');
             const h4Gym = await Gym.findOne({ name: 'H4' });
@@ -85,6 +85,14 @@ const createMember = catchAsync(async (req, res, next) => {
         }
 
         const targetBranchId = req.user.branchId || branchId || null;
+
+        const numericDiscount = Math.max(0, Number(req.body.discount) || 0);
+        const catalogPrice = Number(plan.price) || 0;
+        const netAgreedPrice = req.body.finalPrice !== undefined && req.body.finalPrice !== null && req.body.finalPrice !== ''
+            ? Math.max(0, Number(req.body.finalPrice))
+            : Math.max(0, catalogPrice - numericDiscount);
+
+        const numericPaid = Number(req.body.paidAmount) || 0;
 
         const member = await Member.create({
             name,
@@ -94,8 +102,8 @@ const createMember = catchAsync(async (req, res, next) => {
             joinDate: startDate,
             expiryDate,
             status,
-            planPrice: plan.price,
-            paidAmount: 0,
+            planPrice: netAgreedPrice,
+            paidAmount: numericPaid,
             gymId: targetGymId,
             branchId: targetBranchId
         });
@@ -103,19 +111,64 @@ const createMember = catchAsync(async (req, res, next) => {
         if (member) {
             // Create a User record for the member to allow login
             // Default password is password param or phone number
-            const { password } = req.body;
+            const { password, paymentMethod = 'Cash' } = req.body;
             await User.create({
                 name: member.name,
                 email: emailCheck,
                 password: password || member.phone,
+                phone: member.phone,
                 role: 'member',
-                gymId: targetGymId,
-                branchId: targetBranchId,
                 memberId: member._id,
-                isVerified: true
+                gymId: targetGymId,
+                branchId: targetBranchId
             });
 
-            await logAudit(req, 'MEMBER_CREATED', 'Member', member._id, `Created member: ${member.name}`, member.name);
+            // If an upfront payment was made during registration, record it in the payment ledger
+            if (numericPaid > 0) {
+                const Payment = require('../models/Payment');
+                await Payment.create({
+                    memberId: member._id,
+                    amount: numericPaid,
+                    method: paymentMethod,
+                    date: startDate,
+                    gymId: targetGymId,
+                    branchId: targetBranchId
+                });
+            }
+
+            await logAudit(
+                req,
+                'MEMBER_REGISTERED',
+                'Member',
+                member._id,
+                `Registered new member ${member.name} with plan '${plan.name}' (Catalogue: ₹${catalogPrice}, Discount: ₹${numericDiscount}, Net Fee: ₹${netAgreedPrice}, Paid Upfront: ₹${numericPaid})`,
+                member.name
+            );
+
+            if (req.body.questionnaire) {
+                const q = req.body.questionnaire;
+                const details = [
+                    q.fitnessGoal && `Goal: ${q.fitnessGoal}`,
+                    q.experienceLevel && `Experience: ${q.experienceLevel}`,
+                    q.workoutFrequency && `Frequency: ${q.workoutFrequency}`,
+                    q.dietPreference && `Diet: ${q.dietPreference}`,
+                    q.medicalHistory && `Medical: ${q.medicalHistory}`,
+                    (q.emergencyContactName || q.emergencyContactPhone) && `Emergency: ${q.emergencyContactName || ''} (${q.emergencyContactPhone || ''})`,
+                    q.specialNotes && `Notes: ${q.specialNotes}`
+                ].filter(Boolean).join(' | ');
+
+                if (details) {
+                    await logAudit(
+                        req,
+                        'MEMBER_ASSESSMENT',
+                        'Member',
+                        member._id,
+                        `Onboarding Assessment Questionnaire: ${details}`,
+                        member.name
+                    );
+                }
+            }
+
             res.status(201).json(member);
         } else {
             res.status(400).json({ success: false, message: 'Invalid member data' });
@@ -150,8 +203,15 @@ const getMembers = catchAsync(async (req, res, next) => {
             .limit(Number(limit))
             .lean();
 
+        const { getMemberCode } = require('../utils/idGenerator');
+        const formattedMembers = members.map((m, idx) => ({
+            ...m,
+            empid: getMemberCode(m, skip + idx),
+            displayId: getMemberCode(m, skip + idx)
+        }));
+
         res.json({
-            members,
+            members: formattedMembers,
             page: Number(page),
             pages: Math.ceil(total / limit),
             total
@@ -204,7 +264,7 @@ const getMemberById = catchAsync(async (req, res, next) => {
 // @access  Private/Admin
 const updateMember = catchAsync(async (req, res, next) => {
     try {
-        const { name, phone, email, planId, status, joinDate, branchId, gymId, password } = req.body;
+        const { name, phone, email, planId, status, joinDate, branchId, gymId, password, discount = 0, finalPrice, paidAmount = 0, method = 'Cash' } = req.body;
 
         const query = await buildMemberQuery(req, req.params.id);
         const member = await Member.findOne(query);
@@ -213,22 +273,46 @@ const updateMember = catchAsync(async (req, res, next) => {
             const oldPhone = member.phone;
             const originalGymId = member.gymId ? member.gymId.toString() : '';
 
-            if (planId && planId !== member.planId.toString()) {
+            if (planId) {
                 const planQuery = { _id: planId };
                 if (req.user.role !== 'superadmin' && req.user.role !== 'fitpass_admin') {
                     planQuery.gymId = req.user.gymId;
                 }
                 const plan = await Plan.findOne(planQuery);
-                if (!plan) {
+                if (!plan && planId !== member.planId?.toString()) {
                     return res.status(404).json({ success: false, message: 'Plan not found' });
                 }
-                member.planId = planId;
-                // Recalculate expiry if plan changes
-                const startDate = joinDate ? new Date(joinDate) : new Date(member.joinDate);
-                const expiryDate = new Date(startDate);
-                expiryDate.setDate(startDate.getDate() + plan.duration);
-                member.expiryDate = expiryDate;
-                member.status = expiryDate < new Date() ? 'Expired' : 'Active';
+                if (plan) {
+                    member.planId = planId;
+                    const catPrice = Number(plan.price) || 0;
+                    const disc = Math.max(0, Number(discount) || 0);
+                    const netAgreed = finalPrice !== undefined && finalPrice !== null && finalPrice !== ''
+                        ? Math.max(0, Number(finalPrice))
+                        : (disc > 0 ? Math.max(0, catPrice - disc) : (member.planPrice || catPrice));
+
+                    member.planPrice = netAgreed;
+
+                    // Recalculate expiry if plan changes
+                    const startDate = joinDate ? new Date(joinDate) : new Date(member.joinDate);
+                    const expiryDate = new Date(startDate);
+                    expiryDate.setDate(startDate.getDate() + (plan.duration || 30));
+                    member.expiryDate = expiryDate;
+                    member.status = expiryDate < new Date() ? 'Expired' : 'Active';
+
+                    const numericPaid = Number(paidAmount) || 0;
+                    if (numericPaid > 0) {
+                        member.paidAmount = (member.paidAmount || 0) + numericPaid;
+                        const Payment = require('../models/Payment');
+                        await Payment.create({
+                            memberId: member._id,
+                            amount: numericPaid,
+                            method: method || 'Cash',
+                            date: new Date(),
+                            gymId: member.gymId,
+                            branchId: member.branchId || null
+                        });
+                    }
+                }
             }
 
             member.name = name || member.name;
@@ -241,56 +325,70 @@ const updateMember = catchAsync(async (req, res, next) => {
             let newDivision = '';
 
             if ((req.user.role === 'superadmin' || req.user.role === 'fitpass_admin') && gymId && gymId !== originalGymId) {
+                divisionSwitched = true;
                 const Gym = require('../models/Gym');
-                const h4Gym = await Gym.findOne({ name: 'H4' });
-                const h4GymId = h4Gym ? h4Gym._id.toString() : H4_GYM_IDS[0];
-
-                const wasH4 = originalGymId === h4GymId;
-                const isH4 = gymId === h4GymId;
+                const oldGym = await Gym.findById(originalGymId);
+                const newGym = await Gym.findById(gymId);
+                oldDivision = oldGym ? oldGym.name : 'Unknown Division';
+                newDivision = newGym ? newGym.name : 'Unknown Division';
                 
-                if (wasH4 !== isH4) {
-                    divisionSwitched = true;
-                    oldDivision = wasH4 ? 'H4 Gym Member' : 'FitPass Member';
-                    newDivision = isH4 ? 'H4 Gym Member' : 'FitPass Member';
-                }
+                member.gymId = gymId;
+                member.branchId = null;
             }
 
-            if (req.user.role === 'superadmin' || req.user.role === 'fitpass_admin') {
-                if (gymId !== undefined) member.gymId = gymId;
-            }
             if (branchId !== undefined) {
-                member.branchId = req.user.branchId || branchId || null;
+                member.branchId = branchId || null;
             }
 
             const updatedMember = await member.save();
 
-            // Also update the associated User record to keep credentials and details in sync
-            const user = await User.findOne({ memberId: member._id });
-            if (user) {
-                user.name = member.name;
-                user.phone = member.phone;
-                if (member.email) {
-                    user.email = member.email.trim().toLowerCase();
-                } else if (member.phone && user.email === `${oldPhone}@gym.com`) {
-                    user.email = `${member.phone}@gym.com`;
+            // Handle password update if provided
+            if (password && password.trim() !== '') {
+                const User = require('../models/User');
+                const userDoc = await User.findOne({ 
+                    $or: [
+                        { phone: oldPhone },
+                        { memberId: member._id }
+                    ]
+                });
+                if (userDoc) {
+                    userDoc.password = password.trim();
+                    userDoc.phone = member.phone;
+                    if (email) userDoc.email = email.trim().toLowerCase();
+                    await userDoc.save();
                 }
-                if (password) {
-                    user.password = password;
-                }
-                if (req.user.role === 'superadmin' || req.user.role === 'fitpass_admin') {
-                    if (gymId !== undefined) user.gymId = gymId;
-                }
-                if (branchId !== undefined) {
-                    user.branchId = req.user.branchId || branchId || null;
-                }
-                await user.save();
             }
 
-            if (divisionSwitched) {
-                await logAudit(req, 'MEMBER_DIVISION_SWITCHED', 'Member', member._id, `Switched division from ${oldDivision} to ${newDivision}`, member.name);
-            } else {
-                await logAudit(req, 'MEMBER_UPDATED', 'Member', member._id, `Updated member: ${updatedMember.name}`, updatedMember.name);
+            // Sync phone/email changes to auth User account
+            if (phone || email) {
+                const User = require('../models/User');
+                const userDoc = await User.findOne({ 
+                    $or: [
+                        { phone: oldPhone },
+                        { memberId: member._id }
+                    ]
+                });
+                if (userDoc) {
+                    if (phone) userDoc.phone = phone;
+                    if (email) userDoc.email = email.trim().toLowerCase();
+                    await userDoc.save();
+                }
             }
+
+            // If division was switched, record an audit trail event
+            if (divisionSwitched) {
+                await logAudit(
+                    req,
+                    'MEMBER_DIVISION_SWITCHED',
+                    'Member',
+                    member._id,
+                    `Migrated ${member.name} from division '${oldDivision}' to '${newDivision}'`,
+                    member.name
+                );
+            } else {
+                await logAudit(req, 'MEMBER_UPDATED', 'Member', member._id, `Updated details for member ${member.name}`, member.name);
+            }
+
             res.json(updatedMember);
         } else {
             res.status(404).json({ success: false, message: 'Member not found' });
@@ -307,12 +405,9 @@ const deleteMember = catchAsync(async (req, res, next) => {
         const member = await Member.findOne(query);
 
         if (member) {
-            // Delete associated User record to prevent unique constraint conflicts
-            await User.deleteMany({ memberId: member.id });
-
-            await logAudit(req, 'MEMBER_DELETED', 'Member', member._id, `Deleted member: ${member.name}`, member.name);
-            // Delete the member
+            const memberName = member.name;
             await member.deleteOne();
+            await logAudit(req, 'MEMBER_DELETED', 'Member', req.params.id, `Deleted member ${memberName}`, memberName);
             res.json({ message: 'Member removed' });
         } else {
             res.status(404).json({ success: false, message: 'Member not found' });
@@ -345,9 +440,9 @@ const exportMembersCSV = catchAsync(async (req, res, next) => {
     } catch (error) { next(error); }
 });
 
-// @desc    Get complete audit trail for a member (financial status, plans, division switches)
-// @route   GET /api/members/:id/audit
-// @access  Private (Super Admin only)
+// @desc    Get member audit trail (history, division switches, and financial summary)
+// @route   GET /api/members/:id/audit-trail
+// @access  Private/Superadmin & Admin
 const getMemberAuditTrail = catchAsync(async (req, res, next) => {
     try {
         const member = await Member.findById(req.params.id).populate('planId', 'name price');
@@ -369,9 +464,13 @@ const getMemberAuditTrail = catchAsync(async (req, res, next) => {
             ]
         }).sort({ createdAt: -1 }).lean();
 
-        // Calculate pending payments
-        const planPrice = member.planPrice || (member.planId ? member.planId.price : 0);
-        const pendingAmount = Math.max(0, planPrice - member.paidAmount);
+        // Calculate financial numbers accurately
+        const totalPaidFromPayments = payments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+        const catalogPrice = member.planId ? Number(member.planId.price) : (Number(member.planPrice) || 0);
+        const agreedPrice = member.planPrice !== undefined && member.planPrice !== null && member.planPrice > 0 ? Number(member.planPrice) : catalogPrice;
+        const discountAmount = Math.max(0, catalogPrice - agreedPrice);
+        const currentCyclePaid = member.paidAmount !== undefined && member.paidAmount !== null ? Number(member.paidAmount) : totalPaidFromPayments;
+        const pendingAmount = Math.max(0, agreedPrice - currentCyclePaid);
 
         // Fetch gym name
         const Gym = require('../models/Gym');
@@ -402,11 +501,14 @@ const getMemberAuditTrail = catchAsync(async (req, res, next) => {
                 currentPlan: member.planId ? {
                     id: member.planId._id,
                     name: member.planId.name,
-                    price: planPrice
+                    price: agreedPrice
                 } : null,
                 financials: {
-                    planPrice: planPrice,
-                    paidAmount: member.paidAmount,
+                    catalogPrice,
+                    discountAmount,
+                    planPrice: agreedPrice,
+                    paidAmount: currentCyclePaid,
+                    lifetimePaid: totalPaidFromPayments,
                     pendingAmount: pendingAmount,
                     totalPaymentsCount: payments.length
                 }
@@ -423,7 +525,7 @@ const getMemberAuditTrail = catchAsync(async (req, res, next) => {
 // @access  Private/Admin
 const renewMember = catchAsync(async (req, res, next) => {
     try {
-        const { planId, paidAmount = 0, method = 'Cash' } = req.body;
+        const { planId, paidAmount = 0, discount = 0, finalPrice, method = 'Cash' } = req.body;
         const member = await Member.findById(req.params.id);
         if (!member) {
             return res.status(404).json({ success: false, message: 'Member not found' });
@@ -443,10 +545,16 @@ const renewMember = catchAsync(async (req, res, next) => {
             newExpiry.setDate(newExpiry.getDate() + 30);
         }
 
+        const numericDiscount = Math.max(0, Number(discount) || 0);
+        const catalogPrice = Number(plan.price) || 0;
+        const netAgreedPrice = finalPrice !== undefined && finalPrice !== null && finalPrice !== ''
+            ? Math.max(0, Number(finalPrice))
+            : Math.max(0, catalogPrice - numericDiscount);
+
         member.planId = plan._id;
         member.expiryDate = newExpiry;
         member.status = 'Active';
-        member.planPrice = plan.price;
+        member.planPrice = netAgreedPrice;
 
         if (plan.sessions) {
             member.sessionsRemaining = (member.sessionsRemaining || 0) + plan.sessions;
@@ -454,8 +562,10 @@ const renewMember = catchAsync(async (req, res, next) => {
         }
 
         const numericPaid = Number(paidAmount) || 0;
+        // When renewing/shifting plan, member's paidAmount for this active plan cycle tracks the amount paid towards netAgreedPrice
+        member.paidAmount = numericPaid;
+
         if (numericPaid > 0) {
-            member.paidAmount = (member.paidAmount || 0) + numericPaid;
             const Payment = require('../models/Payment');
             await Payment.create({
                 memberId: member._id,
@@ -468,7 +578,14 @@ const renewMember = catchAsync(async (req, res, next) => {
         }
 
         await member.save();
-        await logAudit(req, 'MEMBER_RENEWED', 'Member', member._id, `Renewed plan '${plan.name}' for ${member.name}`, member.name);
+        await logAudit(
+            req,
+            'MEMBER_RENEWED',
+            'Member',
+            member._id,
+            `Renewed plan '${plan.name}' for ${member.name} (Catalogue: ₹${catalogPrice}, Discount: ₹${numericDiscount}, Net Fee: ₹${netAgreedPrice}, Paid: ₹${numericPaid})`,
+            member.name
+        );
 
         res.json({ success: true, member });
     } catch (error) { next(error); }

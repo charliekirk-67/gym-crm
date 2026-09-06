@@ -26,6 +26,7 @@ import {
   Dumbbell,
   Check,
   Info,
+  MapPin,
 } from 'lucide-react-native';
 import { fontFamilies } from '@/design-system/tokens';
 import { Skeleton } from '@/components/ui';
@@ -68,7 +69,8 @@ const isClassPast = (scheduleDateStr: string, endTimeStr: string) => {
 };
 
 export function H4Classes() {
-  const { data: classesList, isLoading, isRefetching, refetch } = useH4Classes();
+  const [viewAllBranches, setViewAllBranches] = useState(false);
+  const { data: classesList, isLoading, isRefetching, refetch } = useH4Classes(viewAllBranches);
   const bookMutation = useH4BookClass();
   const cancelMutation = useH4CancelClass();
 
@@ -101,7 +103,8 @@ export function H4Classes() {
         const matchesName = cls.name?.toLowerCase().includes(q);
         const matchesTrainer = cls.trainerName?.toLowerCase().includes(q);
         const matchesType = cls.type?.toLowerCase().includes(q);
-        return matchesName || matchesTrainer || matchesType;
+        const matchesBranch = cls.branchName?.toLowerCase().includes(q);
+        return matchesName || matchesTrainer || matchesType || matchesBranch;
       }
       return true;
     });
@@ -182,6 +185,31 @@ export function H4Classes() {
               <Text style={styles.metricLabel}>Open Seats</Text>
             </View>
           </View>
+
+          {/* Branch Filter Switch */}
+          <View style={styles.branchSwitchContainer}>
+            <TouchableOpacity
+              style={[styles.branchSwitchBtn, !viewAllBranches && styles.branchSwitchBtnActive]}
+              onPress={() => setViewAllBranches(false)}
+              activeOpacity={0.8}
+            >
+              <MapPin size={13} color={!viewAllBranches ? '#FFFFFF' : '#64748B'} />
+              <Text style={[styles.branchSwitchText, !viewAllBranches && styles.branchSwitchTextActive]}>
+                My Home Branch
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.branchSwitchBtn, viewAllBranches && styles.branchSwitchBtnActive]}
+              onPress={() => setViewAllBranches(true)}
+              activeOpacity={0.8}
+            >
+              <Sparkles size={13} color={viewAllBranches ? '#FFFFFF' : '#64748B'} />
+              <Text style={[styles.branchSwitchText, viewAllBranches && styles.branchSwitchTextActive]}>
+                All Partner Studios
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Search Bar */}
@@ -189,7 +217,7 @@ export function H4Classes() {
           <Search size={18} color="#64748B" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search class name, trainer, or type..."
+            placeholder="Search class name, trainer, or branch..."
             placeholderTextColor="#94A3B8"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -267,6 +295,7 @@ export function H4Classes() {
               const classId = cls._id || cls.id || '';
               const isFull = cls.seatsAvailable <= 0 && !cls.isBooked;
               const isActioning = actionLoadingId === classId;
+              const isAttended = cls.bookingStatus?.toLowerCase() === 'attended';
               const formattedDate = new Date(cls.scheduleDate).toLocaleDateString('en-IN', {
                 weekday: 'short',
                 day: 'numeric',
@@ -293,7 +322,12 @@ export function H4Classes() {
                       <Text style={styles.categoryPillText}>{(cls.type || 'STUDIO').toUpperCase()}</Text>
                     </View>
 
-                    {isPast ? (
+                    {isAttended ? (
+                      <View style={[styles.statusBookedBadge, { backgroundColor: '#DCFCE7', borderColor: '#86EFAC' }]}>
+                        <CheckCircle2 size={13} color="#16A34A" />
+                        <Text style={[styles.statusBookedText, { color: '#16A34A' }]}>✓ ATTENDED</Text>
+                      </View>
+                    ) : isPast ? (
                       <View style={[styles.statusFullBadge, { backgroundColor: '#F3F4F6' }]}>
                         <Text style={[styles.statusFullText, { color: '#6B7280' }]}>COMPLETED</Text>
                       </View>
@@ -323,6 +357,14 @@ export function H4Classes() {
 
                   {/* Meta Items Row */}
                   <View style={styles.metaRow}>
+                    {/* Branch Location Badge */}
+                    <View style={[styles.metaBadge, styles.branchBadge]}>
+                      <MapPin size={13} color="#F0A020" />
+                      <Text style={[styles.metaText, styles.branchBadgeText]} numberOfLines={1}>
+                        {cls.branchName || 'Main Studio'}
+                      </Text>
+                    </View>
+
                     <View style={styles.metaBadge}>
                       <Calendar size={13} color="#F0A020" />
                       <Text style={styles.metaText}>{formattedDate}</Text>
@@ -645,4 +687,42 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   cancelBookingText: { fontSize: 14, fontWeight: '800', color: '#DC2626' },
+
+  branchSwitchContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 12,
+    padding: 3,
+    gap: 4,
+    marginTop: 2,
+  },
+  branchSwitchBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  branchSwitchBtnActive: {
+    backgroundColor: '#F0A020',
+  },
+  branchSwitchText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  branchSwitchTextActive: {
+    color: '#FFFFFF',
+  },
+
+  branchBadge: {
+    backgroundColor: 'rgba(240, 160, 32, 0.08)',
+    borderColor: 'rgba(240, 160, 32, 0.25)',
+  },
+  branchBadgeText: {
+    color: '#D97706',
+    fontWeight: '700',
+  },
 });

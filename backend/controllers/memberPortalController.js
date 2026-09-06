@@ -180,7 +180,12 @@ const getMyAttendance = catchAsync(async (req, res, next) => {
 
     const memberId = member.id;
 
-    const [sessions, auditLogs, gyms] = await Promise.all([
+    const [traditionalAttendance, sessions, auditLogs, gyms, branches] = await Promise.all([
+        prisma.attendance.findMany({
+            where: { memberId },
+            orderBy: { date: 'desc' },
+            take: 100,
+        }).catch(() => []),
         prisma.sessionCheckIn.findMany({
             where: { memberId },
             orderBy: { startedAt: 'desc' },
@@ -192,6 +197,7 @@ const getMyAttendance = catchAsync(async (req, res, next) => {
             take: 50,
         }).catch(() => []),
         prisma.gym.findMany({}).catch(() => []),
+        prisma.branch.findMany({}).catch(() => []),
     ]);
 
     const gymMap = new Map();
@@ -199,35 +205,70 @@ const getMyAttendance = catchAsync(async (req, res, next) => {
         gymMap.set(g.id, g.name);
     });
 
+    const branchMap = new Map();
+    branches.forEach((b) => {
+        branchMap.set(b.id, b.name);
+    });
+
     const memberGymName = (member.gymId && gymMap.get(member.gymId)) || 'H4 Fitness Gym';
 
     const items = [];
     const usedTimestamps = new Set();
 
-    // 1. Process session check-ins as primary source
-    sessions.forEach((s) => {
-        const timeKey = s.startedAt ? new Date(s.startedAt).getTime() : 0;
-        let gymName = s.gymName;
-        if (!gymName || gymName === 'Partner Gym' || gymName.includes('Partner')) {
-            gymName = gymMap.get(s.gymId) || memberGymName;
+    // 1. Process traditional CRM desk & mobile check-ins
+    traditionalAttendance.forEach((att) => {
+        const timeKey = att.date ? new Date(att.date).getTime() : 0;
+        const windowKey = Math.floor(timeKey / 120000);
+        let branchName = att.branchId ? branchMap.get(att.branchId) : null;
+        let gymName = gymMap.get(att.gymId) || memberGymName;
+        if (branchName) {
+            gymName = `${gymName} - ${branchName}`;
         }
 
         items.push({
-            _id: s.id,
-            id: s.id,
-            memberId: s.memberId,
-            date: s.startedAt ? s.startedAt.toISOString() : new Date().toISOString(),
-            checkInTime: s.startedAt ? s.startedAt.toTimeString().split(' ')[0] : '',
-            gymId: s.gymId,
+            _id: att.id,
+            id: att.id,
+            memberId: att.memberId,
+            date: att.date ? att.date.toISOString() : new Date().toISOString(),
+            checkInTime: att.checkInTime || '',
+            gymId: att.gymId,
+            branchId: att.branchId || null,
             gymName: gymName,
-            isFitPrimeSession: true,
-            status: s.status || 'Completed',
+            isFitPrimeSession: false,
+            status: 'Completed',
         });
 
-        if (timeKey) usedTimestamps.add(Math.floor(timeKey / 120000)); // 2-min window key
+        if (timeKey) usedTimestamps.add(windowKey);
     });
 
-    // 2. Process audit logs for check-ins not captured in sessionCheckIn
+    // 2. Process session check-ins as source
+    sessions.forEach((s) => {
+        const timeKey = s.startedAt ? new Date(s.startedAt).getTime() : 0;
+        const windowKey = Math.floor(timeKey / 120000);
+
+        if (!usedTimestamps.has(windowKey)) {
+            let gymName = s.gymName;
+            if (!gymName || gymName === 'Partner Gym' || gymName.includes('Partner')) {
+                gymName = gymMap.get(s.gymId) || memberGymName;
+            }
+
+            items.push({
+                _id: s.id,
+                id: s.id,
+                memberId: s.memberId,
+                date: s.startedAt ? s.startedAt.toISOString() : new Date().toISOString(),
+                checkInTime: s.startedAt ? s.startedAt.toTimeString().split(' ')[0] : '',
+                gymId: s.gymId,
+                gymName: gymName,
+                isFitPrimeSession: true,
+                status: s.status || 'Completed',
+            });
+
+            if (timeKey) usedTimestamps.add(windowKey);
+        }
+    });
+
+    // 3. Process audit logs for check-ins not captured in sessionCheckIn
     auditLogs.forEach((a) => {
         const timeKey = a.checkInTimestamp ? new Date(a.checkInTimestamp).getTime() : 0;
         const windowKey = Math.floor(timeKey / 120000);
@@ -255,6 +296,50 @@ const getMyAttendance = catchAsync(async (req, res, next) => {
 
     items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     res.json(items);
+});
+
+// @desc    Get member's digital membership pass (permanent QR code + membership details)
+// @route   GET /api/member-portal/digital-pass
+// @access  Private/Member
+const getMyDigitalPass = catchAsync(async (req, res, next) => {
+    const member = await resolveMember(req);
+    if (!member) {
+        return res.status(404).json({ message: 'Member profile not found' });
+    }
+
+    let plan = null;
+    if (member.planId) {
+        plan = await prisma.plan.findUnique({ where: { id: member.planId } }).catch(() => null);
+    }
+
+    // Stable QR payload that works offline and is instantly scannable by reception/trainers
+    const qrData = JSON.stringify({
+        type: 'MEMBER_PASS',
+        mid: member.id,
+        phone: member.phone,
+        gymId: member.gymId,
+        branchId: member.branchId || null
+    });
+
+    res.json({
+        success: true,
+        member: {
+            id: member.id,
+            name: member.name,
+            phone: member.phone,
+            email: member.email,
+            status: member.status,
+            gymId: member.gymId,
+            branchId: member.branchId || null,
+            sessionsRemaining: member.sessionsRemaining ?? 0,
+            sessionsTotal: member.sessionsTotal ?? 0,
+            planName: plan?.name || 'Active Membership'
+        },
+        memberId: member.id,
+        qrData,
+        pin: member.phone ? member.phone.slice(-4) : '0000', // simple predictable phone PIN fallback
+        expiresInSeconds: 0 // permanent pass, never forces false-positive expiration
+    });
 });
 
 // @desc    Get logged in member payments
@@ -813,5 +898,6 @@ module.exports = {
     getPartnerGyms,
     getPartnerGymById,
     getDashboardData,
-    updateMyProfile
+    updateMyProfile,
+    getMyDigitalPass
 };

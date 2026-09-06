@@ -13,7 +13,13 @@ const getStaff = catchAsync(async (req, res, next) => {
         };
 
         const staff = await User.find(query).select('-password').lean();
-        res.json(staff);
+        const { getStaffCode } = require('../utils/idGenerator');
+        const formattedStaff = staff.map((s, idx) => ({
+            ...s,
+            empid: getStaffCode(s, idx),
+            displayId: getStaffCode(s, idx)
+        }));
+        res.json(formattedStaff);
     } catch (error) { next(error); }
 });
 

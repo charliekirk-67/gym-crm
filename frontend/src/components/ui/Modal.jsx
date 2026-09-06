@@ -28,11 +28,18 @@ const Modal = ({
 
     if (!isOpen) return null;
 
+    const handleOverlayClick = (e) => {
+        if (e.target === e.currentTarget && closeOnOverlayClick) {
+            onClose?.();
+        }
+    };
+
     return (
-        <div className="modal-overlay" onClick={closeOnOverlayClick ? onClose : undefined}>
+        <div className="modal-overlay" onMouseDown={handleOverlayClick}>
             <div
                 className="modal-content"
                 style={{ maxWidth: MAX_WIDTH[size] || MAX_WIDTH.md }}
+                onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
                 role="dialog"
                 aria-modal="true"

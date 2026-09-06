@@ -34,12 +34,17 @@ const Payments = () => {
     const handleAddPayment = async (e) => {
         e.preventDefault();
         try {
-            await createPayment(formData);
+            await createPayment({
+                memberId: formData.memberId,
+                amount: Number(formData.amount),
+                method: formData.method,
+                paymentMethod: formData.method
+            });
             fetchData();
             setIsModalOpen(false);
             setFormData({ memberId: '', amount: '', method: 'Cash' });
-        } catch {
-            alert('Error recording payment');
+        } catch (error) {
+            alert(error.response?.data?.message || 'Error recording payment');
         }
     };
 
@@ -98,14 +103,69 @@ const Payments = () => {
                 <form onSubmit={handleAddPayment}>
                     <div className="input-group">
                         <label>Select Member</label>
-                        <select className="input" value={formData.memberId} onChange={(e) => setFormData({ ...formData, memberId: e.target.value })} required>
+                        <select
+                            className="input"
+                            value={formData.memberId}
+                            onChange={(e) => {
+                                const sel = members.find(m => m._id === e.target.value);
+                                const planPrice = Number(sel?.planPrice || sel?.planId?.price || 0);
+                                const paid = Number(sel?.paidAmount || 0);
+                                const due = Math.max(0, planPrice - paid);
+                                setFormData({
+                                    ...formData,
+                                    memberId: e.target.value,
+                                    amount: due > 0 ? due : ''
+                                });
+                            }}
+                            required
+                        >
                             <option value="">Select a member</option>
-                            {members.map(m => <option key={m._id} value={m._id}>{m.name} ({m.phone})</option>)}
+                            {members.map(m => {
+                                const price = Number(m.planPrice || m.planId?.price || 0);
+                                const paid = Number(m.paidAmount || 0);
+                                const due = Math.max(0, price - paid);
+                                return (
+                                    <option key={m._id} value={m._id}>
+                                        {m.name} ({m.phone}) {due > 0 ? `— ₹${due} Due` : '— Settled'}
+                                    </option>
+                                );
+                            })}
                         </select>
                     </div>
+
+                    {formData.memberId && (() => {
+                        const sel = members.find(m => m._id === formData.memberId);
+                        if (!sel) return null;
+                        const planPrice = Number(sel.planPrice || sel.planId?.price || 0);
+                        const paid = Number(sel.paidAmount || 0);
+                        const due = Math.max(0, planPrice - paid);
+                        return (
+                            <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '0.85rem', marginBottom: '1rem' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '0.5rem', fontSize: '0.82rem' }}>
+                                    <div>
+                                        <span style={{ color: 'var(--text-secondary)', display: 'block', fontSize: '0.75rem' }}>Active Plan</span>
+                                        <strong style={{ color: '#fff' }}>{sel.planId?.name || 'Custom'}</strong>
+                                    </div>
+                                    <div>
+                                        <span style={{ color: 'var(--text-secondary)', display: 'block', fontSize: '0.75rem' }}>Agreed Fee</span>
+                                        <strong style={{ color: 'var(--primary, #f59e0b)' }}>₹{planPrice}</strong>
+                                    </div>
+                                    <div>
+                                        <span style={{ color: 'var(--text-secondary)', display: 'block', fontSize: '0.75rem' }}>Paid So Far</span>
+                                        <strong style={{ color: '#10b981' }}>₹{paid}</strong>
+                                    </div>
+                                    <div>
+                                        <span style={{ color: 'var(--text-secondary)', display: 'block', fontSize: '0.75rem' }}>Outstanding Due</span>
+                                        <strong style={{ color: due > 0 ? '#ef4444' : '#10b981' }}>{due > 0 ? `₹${due} Due` : '₹0 Settled'}</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })()}
+
                     <div className="input-group">
-                        <label>Amount (₹)</label>
-                        <input className="input" type="number" value={formData.amount} onChange={(e) => setFormData({ ...formData, amount: e.target.value })} required />
+                        <label>Amount to Collect (₹)</label>
+                        <input className="input" type="number" min="1" value={formData.amount} onChange={(e) => setFormData({ ...formData, amount: e.target.value })} required />
                     </div>
                     <div className="input-group">
                         <label>Payment Method</label>
@@ -113,6 +173,7 @@ const Payments = () => {
                             <option value="Cash">Cash</option>
                             <option value="UPI">UPI</option>
                             <option value="Card">Card</option>
+                            <option value="Bank Transfer">Bank Transfer</option>
                         </select>
                     </div>
                     <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }}>Submit Payment</button>

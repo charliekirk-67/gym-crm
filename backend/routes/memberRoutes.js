@@ -24,16 +24,23 @@ const createMemberSchema = z.object({
     planId: z.string().min(1, 'Plan ID is required'),
     joinDate: z.string().optional(),
     branchId: z.string().optional().nullable(),
-    gymId: z.string().optional()
-});
+    gymId: z.string().optional(),
+    discount: z.union([z.number(), z.string()]).optional(),
+    paidAmount: z.union([z.number(), z.string()]).optional(),
+    finalPrice: z.union([z.number(), z.string()]).optional(),
+    paymentMethod: z.string().optional(),
+    password: z.string().optional()
+}).passthrough();
 
-const updateMemberSchema = createMemberSchema.partial();
+const updateMemberSchema = createMemberSchema.partial().passthrough();
 
 const renewMemberSchema = z.object({
     planId: z.string().min(1, 'Plan ID is required'),
     paymentMethod: z.string().optional(),
-    amountPaid: z.number().optional()
-});
+    amountPaid: z.union([z.number(), z.string()]).optional(),
+    discount: z.union([z.number(), z.string()]).optional(),
+    finalPrice: z.union([z.number(), z.string()]).optional()
+}).passthrough();
 
 const transferMemberSchema = z.object({
     targetBranchId: z.string().min(1, 'Target Branch ID is required')

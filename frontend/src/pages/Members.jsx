@@ -25,6 +25,17 @@ const Members = () => {
     const [branches, setBranches] = useState([]);
     const [branchFilter, setBranchFilter] = useState('');
     const [formData, setFormData] = useState({ name: '', phone: '', email: '', planId: '', joinDate: '', branchId: '', gymId: '', password: '' });
+    const [wizardStep, setWizardStep] = useState(1);
+    const [questionnaire, setQuestionnaire] = useState({
+        fitnessGoal: 'Fat Loss',
+        experienceLevel: 'Beginner',
+        workoutFrequency: '3-4 Days / Week',
+        dietPreference: 'Vegetarian',
+        medicalHistory: '',
+        emergencyContactName: '',
+        emergencyContactPhone: '',
+        specialNotes: ''
+    });
     const [highlightId, setHighlightId] = useState(null);
     const highlightRef = useRef(null);
     const [convertingLeadId, setConvertingLeadId] = useState(null);
@@ -195,12 +206,13 @@ const Members = () => {
     };
 
     const handleSubmit = async (e) => {
-        e.preventDefault();
+        if (e) e.preventDefault();
         try {
             if (editingMember) {
                 await updateMember(editingMember._id, formData);
+                alert(`✅ Member "${formData.name}" details updated successfully.`);
             } else {
-                const newMember = await createMember(formData);
+                const newMember = await createMember({ ...formData, questionnaire });
                 if (convertingLeadId) {
                     try {
                         await API.put(`/leads/${convertingLeadId}`, {
@@ -212,9 +224,27 @@ const Members = () => {
                     }
                     setConvertingLeadId(null);
                 }
+                alert(`🎉 Member "${formData.name}" registered successfully!`);
+                if (newMember?._id) {
+                    setHighlightId(newMember._id);
+                }
             }
             fetchData();
             setIsModalOpen(false);
+            setWizardStep(1);
+            setFormData({
+                name: '',
+                phone: '',
+                email: '',
+                planId: '',
+                joinDate: new Date().toISOString().split('T')[0],
+                branchId: user?.branchId || '',
+                gymId: '',
+                password: '',
+                discount: 0,
+                paidAmount: '',
+                paymentMethod: 'Cash'
+            });
         } catch (error) {
             alert(error.response?.data?.message || 'Error saving member');
         }
@@ -457,6 +487,7 @@ const Members = () => {
                 <table>
                     <thead>
                         <tr>
+                            <th>Member ID</th>
                             <th>Member</th>
                             <th className="hide-mobile">Phone</th>
                             <th>Plan</th>
@@ -469,7 +500,7 @@ const Members = () => {
                     <tbody>
                         {filteredMembers.length === 0 ? (
                             <tr>
-                                <td colSpan="7">
+                                <td colSpan="8">
                                     <div className="empty-state">
                                         <div className="empty-state-icon">👥</div>
                                         <h3>No members found</h3>
@@ -477,7 +508,7 @@ const Members = () => {
                                     </div>
                                 </td>
                             </tr>
-                        ) : filteredMembers.map(member => (
+                        ) : filteredMembers.map((member, idx) => (
                             <tr
                                 key={member._id}
                                 ref={member._id === highlightId ? highlightRef : null}
@@ -487,6 +518,11 @@ const Members = () => {
                                     transition: 'background 1s, outline 1s'
                                 } : {}}
                             >
+                                <td>
+                                    <span style={{ fontFamily: 'monospace', fontWeight: '700', fontSize: '0.85rem', color: 'var(--primary, #f59e0b)', background: 'rgba(245, 158, 11, 0.08)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
+                                        {member.displayId || member.empid || `MEM${1001 + idx}`}
+                                    </span>
+                                </td>
                                 <td>
                                     <div style={{ fontWeight: '600' }}>{member.name}</div>
                                     <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{member.email}</div>
@@ -564,63 +600,427 @@ const Members = () => {
                 </div>
             )}
 
-            <Modal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setConvertingLeadId(null); }} title={editingMember ? 'Edit Member' : 'Add New Member'}>
-                <form onSubmit={handleSubmit}>
+            <Modal
+                isOpen={isModalOpen}
+                onClose={() => { setIsModalOpen(false); setConvertingLeadId(null); setWizardStep(1); }}
+                closeOnOverlayClick={false}
+                title={editingMember ? 'Edit Member Details' : `📝 Member Registration & Assessment (${wizardStep}/3)`}
+            >
+                <form
+                    onSubmit={(e) => {
+                        e.preventDefault();
+                    }}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
+                            e.preventDefault();
+                        }
+                    }}
+                >
                     {convertingLeadId && (
                         <div style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', padding: '0.6rem 0.85rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem', fontWeight: '600' }}>
                             🎯 Converting lead to member — details pre-filled below.
                         </div>
                     )}
-                    <div className="form-grid">
-                        <div className="input-group full-width">
-                            <label>Name</label>
-                            <input className="input" type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} required />
+
+                    {!editingMember && (
+                        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
+                            <div style={{ flex: 1, padding: '0.5rem', background: wizardStep >= 1 ? 'var(--primary, #f59e0b)' : 'rgba(255,255,255,0.05)', color: wizardStep >= 1 ? '#000' : 'var(--text-secondary)', borderRadius: '6px', textAlign: 'center', fontSize: '0.78rem', fontWeight: '700' }}>
+                                1. Personal & Plan
+                            </div>
+                            <div style={{ flex: 1, padding: '0.5rem', background: wizardStep >= 2 ? 'var(--primary, #f59e0b)' : 'rgba(255,255,255,0.05)', color: wizardStep >= 2 ? '#000' : 'var(--text-secondary)', borderRadius: '6px', textAlign: 'center', fontSize: '0.78rem', fontWeight: '700' }}>
+                                2. Goals (MCQ)
+                            </div>
+                            <div style={{ flex: 1, padding: '0.5rem', background: wizardStep >= 3 ? 'var(--primary, #f59e0b)' : 'rgba(255,255,255,0.05)', color: wizardStep >= 3 ? '#000' : 'var(--text-secondary)', borderRadius: '6px', textAlign: 'center', fontSize: '0.78rem', fontWeight: '700' }}>
+                                3. Health & Notes
+                            </div>
                         </div>
-                        <div className="input-group">
-                            <label>Phone</label>
-                            <input className="input" type="text" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} required />
-                        </div>
-                        <div className="input-group">
-                            <label>Email (Optional)</label>
-                            <input className="input" type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} />
-                        </div>
-                        <div className="input-group">
-                            <label>Subscription Plan</label>
-                            <select className="input" value={formData.planId} onChange={(e) => setFormData({ ...formData, planId: e.target.value })} required>
-                                <option value="">Select a plan</option>
-                                {plans.map(p => <option key={p._id} value={p._id}>{p.name} (₹{p.price})</option>)}
-                            </select>
-                        </div>
-                        {!user?.branchId && (
+                    )}
+
+                    {/* ─── STEP 1: Personal & Plan Info ─── */}
+                    {(editingMember || wizardStep === 1) && (
+                        <div className="form-grid">
+                            <div className="input-group full-width">
+                                <label>Full Name *</label>
+                                <input className="input" type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} required />
+                            </div>
                             <div className="input-group">
-                                <label>Branch (optional)</label>
-                                <select className="input" value={formData.branchId} onChange={(e) => setFormData({ ...formData, branchId: e.target.value })}>
-                                    <option value="">No Branch / All Locations</option>
-                                    {branches.map(b => <option key={b._id} value={b._id}>🏢 {b.name}</option>)}
+                                <label>Phone Number *</label>
+                                <input className="input" type="text" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} required />
+                            </div>
+                            <div className="input-group">
+                                <label>Email (Optional)</label>
+                                <input className="input" type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} />
+                            </div>
+                            <div className="input-group">
+                                <label>Subscription Plan *</label>
+                                <select
+                                    className="input"
+                                    value={formData.planId}
+                                    onChange={(e) => {
+                                        const selected = plans.find(p => p._id === e.target.value);
+                                        const catPrice = selected ? Number(selected.price) : 0;
+                                        const disc = Math.max(0, Number(formData.discount) || 0);
+                                        const net = Math.max(0, catPrice - disc);
+                                        setFormData({
+                                            ...formData,
+                                            planId: e.target.value,
+                                            paidAmount: net
+                                        });
+                                    }}
+                                    required
+                                >
+                                    <option value="">Select a plan</option>
+                                    {plans.map(p => <option key={p._id} value={p._id}>{p.name} (₹{p.price})</option>)}
                                 </select>
                             </div>
-                        )}
-                        {['superadmin', 'fitpass_admin'].includes(user?.role) && (
+
+                            {/* Plan Pricing & Discount Breakdown */}
+                            {formData.planId && (
+                                (() => {
+                                    const selected = plans.find(p => p._id === formData.planId);
+                                    const catPrice = selected ? Number(selected.price) : 0;
+                                    const disc = Math.max(0, Number(formData.discount) || 0);
+                                    const net = Math.max(0, catPrice - disc);
+                                    const paid = Math.max(0, Number(formData.paidAmount) || 0);
+                                    const pending = Math.max(0, net - paid);
+
+                                    return (
+                                        <div className="full-width" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '1rem', marginTop: '0.25rem', marginBottom: '0.5rem' }}>
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                                                <div>
+                                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>Catalogue Price</span>
+                                                    <strong style={{ fontSize: '1rem', color: '#fff' }}>₹{catPrice}</strong>
+                                                </div>
+                                                <div>
+                                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>Discount Given</span>
+                                                    <strong style={{ fontSize: '1rem', color: disc > 0 ? '#10b981' : '#fff' }}>-₹{disc}</strong>
+                                                </div>
+                                                <div>
+                                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>Net Agreed Fee</span>
+                                                    <strong style={{ fontSize: '1.1rem', color: 'var(--primary, #f59e0b)' }}>₹{net}</strong>
+                                                </div>
+                                                <div>
+                                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>Pending Balance</span>
+                                                    <strong style={{ fontSize: '1rem', color: pending > 0 ? '#ef4444' : '#10b981' }}>
+                                                        {pending > 0 ? `₹${pending} Due` : '₹0 Settled'}
+                                                    </strong>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()
+                            )}
+
+                            {!editingMember && formData.planId && (
+                                <>
+                                    <div className="input-group">
+                                        <label>Manual Discount (₹)</label>
+                                        <input
+                                            className="input"
+                                            type="number"
+                                            min="0"
+                                            value={formData.discount || ''}
+                                            onChange={(e) => {
+                                                const discVal = Math.max(0, Number(e.target.value) || 0);
+                                                const selected = plans.find(p => p._id === formData.planId);
+                                                const catPrice = selected ? Number(selected.price) : 0;
+                                                const net = Math.max(0, catPrice - discVal);
+                                                setFormData({
+                                                    ...formData,
+                                                    discount: e.target.value,
+                                                    paidAmount: net
+                                                });
+                                            }}
+                                            placeholder="0 (No discount)"
+                                        />
+                                    </div>
+                                    <div className="input-group">
+                                        <label>Amount Paid Upfront (₹) *</label>
+                                        <input
+                                            className="input"
+                                            type="number"
+                                            min="0"
+                                            value={formData.paidAmount}
+                                            onChange={(e) => setFormData({ ...formData, paidAmount: e.target.value })}
+                                            placeholder="Amount collected now"
+                                            required
+                                        />
+                                    </div>
+                                    <div className="input-group">
+                                        <label>Payment Method</label>
+                                        <select
+                                            className="input"
+                                            value={formData.paymentMethod || 'Cash'}
+                                            onChange={(e) => setFormData({ ...formData, paymentMethod: e.target.value })}
+                                        >
+                                            <option value="Cash">Cash</option>
+                                            <option value="UPI">UPI</option>
+                                            <option value="Card">Card</option>
+                                            <option value="Bank Transfer">Bank Transfer</option>
+                                        </select>
+                                    </div>
+                                </>
+                            )}
+
+                            {!user?.branchId && (
+                                <div className="input-group">
+                                    <label>Branch (optional)</label>
+                                    <select className="input" value={formData.branchId} onChange={(e) => setFormData({ ...formData, branchId: e.target.value })}>
+                                        <option value="">No Branch / All Locations</option>
+                                        {branches.map(b => <option key={b._id} value={b._id}>🏢 {b.name}</option>)}
+                                    </select>
+                                </div>
+                            )}
+                            {['superadmin', 'fitpass_admin'].includes(user?.role) && (
+                                <div className="input-group">
+                                    <label>Gym Division / Partner Gym</label>
+                                    <select className="input" value={formData.gymId} onChange={(e) => setFormData({ ...formData, gymId: e.target.value })} required>
+                                        <option value="">Select Gym</option>
+                                        {gyms.map(g => <option key={g._id || g.id} value={g._id || g.id}>{g.name}</option>)}
+                                    </select>
+                                </div>
+                            )}
                             <div className="input-group">
-                                <label>Gym Division / Partner Gym</label>
-                                <select className="input" value={formData.gymId} onChange={(e) => setFormData({ ...formData, gymId: e.target.value })} required>
-                                    <option value="">Select Gym</option>
-                                    {gyms.map(g => <option key={g._id || g.id} value={g._id || g.id}>{g.name}</option>)}
-                                </select>
+                                <label>{editingMember ? 'Reset Password (optional)' : 'Password (optional, default: Phone)'}</label>
+                                <input className="input" type="password" placeholder="Set member password" value={formData.password || ''} onChange={(e) => setFormData({ ...formData, password: e.target.value })} />
                             </div>
-                        )}
-                        <div className="input-group">
-                            <label>{editingMember ? 'Reset Password (optional)' : 'Password (optional, default: Phone)'}</label>
-                            <input className="input" type="password" placeholder="Set member password" value={formData.password || ''} onChange={(e) => setFormData({ ...formData, password: e.target.value })} />
+                            {!editingMember && (
+                                <div className="input-group">
+                                    <label>Join Date *</label>
+                                    <input className="input" type="date" value={formData.joinDate} onChange={(e) => setFormData({ ...formData, joinDate: e.target.value })} required />
+                                </div>
+                            )}
                         </div>
-                        {!editingMember && (
+                    )}
+
+                    {/* ─── STEP 2: MCQ Fitness & Lifestyle Questionnaire ─── */}
+                    {!editingMember && wizardStep === 2 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                             <div className="input-group">
-                                <label>Join Date</label>
-                                <input className="input" type="date" value={formData.joinDate} onChange={(e) => setFormData({ ...formData, joinDate: e.target.value })} required />
+                                <label style={{ fontWeight: '700', marginBottom: '0.5rem', display: 'block', color: 'var(--text-color, #1f2937)' }}>Q1. What is the member's Primary Fitness Goal? (Multiple Choice)</label>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                                    {[
+                                        { val: 'Fat Loss', label: '🔥 Fat Loss & Toning' },
+                                        { val: 'Muscle Hypertrophy', label: '💪 Muscle Mass & Bodybuilding' },
+                                        { val: 'Athletic Endurance', label: '🏃 Athletic Endurance & Cardio' },
+                                        { val: 'General Wellness', label: '🧘 Mobility & General Health' }
+                                    ].map(opt => (
+                                        <div
+                                            key={opt.val}
+                                            onClick={() => setQuestionnaire({ ...questionnaire, fitnessGoal: opt.val })}
+                                            style={{
+                                                padding: '0.85rem',
+                                                borderRadius: '8px',
+                                                border: `2px solid ${questionnaire.fitnessGoal === opt.val ? 'var(--primary, #f59e0b)' : 'var(--border-color, #d1d5db)'}`,
+                                                background: questionnaire.fitnessGoal === opt.val ? 'rgba(245, 158, 11, 0.12)' : 'var(--bg-card, rgba(0,0,0,0.02))',
+                                                cursor: 'pointer',
+                                                fontSize: '0.88rem',
+                                                fontWeight: questionnaire.fitnessGoal === opt.val ? '700' : '600',
+                                                color: questionnaire.fitnessGoal === opt.val ? 'var(--primary, #d97706)' : 'var(--text-color, #1f2937)'
+                                            }}
+                                        >
+                                            {opt.label}
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
+
+                            <div className="input-group">
+                                <label style={{ fontWeight: '700', marginBottom: '0.5rem', display: 'block', color: 'var(--text-color, #1f2937)' }}>Q2. Gym Training Experience Level? (Multiple Choice)</label>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem' }}>
+                                    {[
+                                        { val: 'Beginner', label: '🐣 Beginner (< 6 mos)' },
+                                        { val: 'Intermediate', label: '🏋️ Intermediate (1-2 yrs)' },
+                                        { val: 'Advanced', label: '🏆 Advanced (3+ yrs)' }
+                                    ].map(opt => (
+                                        <div
+                                            key={opt.val}
+                                            onClick={() => setQuestionnaire({ ...questionnaire, experienceLevel: opt.val })}
+                                            style={{
+                                                padding: '0.75rem 0.5rem',
+                                                borderRadius: '8px',
+                                                border: `2px solid ${questionnaire.experienceLevel === opt.val ? 'var(--primary, #f59e0b)' : 'var(--border-color, #d1d5db)'}`,
+                                                background: questionnaire.experienceLevel === opt.val ? 'rgba(245, 158, 11, 0.12)' : 'var(--bg-card, rgba(0,0,0,0.02))',
+                                                cursor: 'pointer',
+                                                textAlign: 'center',
+                                                fontSize: '0.82rem',
+                                                fontWeight: questionnaire.experienceLevel === opt.val ? '700' : '600',
+                                                color: questionnaire.experienceLevel === opt.val ? 'var(--primary, #d97706)' : 'var(--text-color, #1f2937)'
+                                            }}
+                                        >
+                                            {opt.label}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="input-group">
+                                <label style={{ fontWeight: '700', marginBottom: '0.5rem', display: 'block', color: 'var(--text-color, #1f2937)' }}>Q3. Planned Workout Frequency? (Multiple Choice)</label>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem' }}>
+                                    {['1-2 Days / Week', '3-4 Days / Week', '5-6 Days / Week'].map(freq => (
+                                        <div
+                                            key={freq}
+                                            onClick={() => setQuestionnaire({ ...questionnaire, workoutFrequency: freq })}
+                                            style={{
+                                                padding: '0.75rem 0.5rem',
+                                                borderRadius: '8px',
+                                                border: `2px solid ${questionnaire.workoutFrequency === freq ? 'var(--primary, #f59e0b)' : 'var(--border-color, #d1d5db)'}`,
+                                                background: questionnaire.workoutFrequency === freq ? 'rgba(245, 158, 11, 0.12)' : 'var(--bg-card, rgba(0,0,0,0.02))',
+                                                cursor: 'pointer',
+                                                textAlign: 'center',
+                                                fontSize: '0.82rem',
+                                                fontWeight: questionnaire.workoutFrequency === freq ? '700' : '600',
+                                                color: questionnaire.workoutFrequency === freq ? 'var(--primary, #d97706)' : 'var(--text-color, #1f2937)'
+                                            }}
+                                        >
+                                            {freq}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="input-group">
+                                <label style={{ fontWeight: '700', marginBottom: '0.5rem', display: 'block', color: 'var(--text-color, #1f2937)' }}>Q4. Dietary / Nutrition Preference? (Multiple Choice)</label>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                                    {[
+                                        { val: 'Vegetarian', label: '🥗 Vegetarian' },
+                                        { val: 'Non-Vegetarian', label: '🍗 Non-Vegetarian' },
+                                        { val: 'Vegan', label: '🌱 Vegan / Plant-Based' },
+                                        { val: 'Keto', label: '🥩 High Protein / Keto' }
+                                    ].map(diet => (
+                                        <div
+                                            key={diet.val}
+                                            onClick={() => setQuestionnaire({ ...questionnaire, dietPreference: diet.val })}
+                                            style={{
+                                                padding: '0.75rem',
+                                                borderRadius: '8px',
+                                                border: `2px solid ${questionnaire.dietPreference === diet.val ? 'var(--primary, #f59e0b)' : 'var(--border-color, #d1d5db)'}`,
+                                                background: questionnaire.dietPreference === diet.val ? 'rgba(245, 158, 11, 0.12)' : 'var(--bg-card, rgba(0,0,0,0.02))',
+                                                cursor: 'pointer',
+                                                fontSize: '0.85rem',
+                                                fontWeight: questionnaire.dietPreference === diet.val ? '700' : '600',
+                                                color: questionnaire.dietPreference === diet.val ? 'var(--primary, #d97706)' : 'var(--text-color, #1f2937)'
+                                            }}
+                                        >
+                                            {diet.label}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ─── STEP 3: Specific Health & Emergency Textbox Questions ─── */}
+                    {!editingMember && wizardStep === 3 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                            <div className="input-group">
+                                <label style={{ fontWeight: '700', marginBottom: '0.4rem', display: 'block', color: 'var(--text-color, #1f2937)' }}>Q5. Medical History, Past Injuries or Pre-existing Conditions (Text Box)</label>
+                                <textarea
+                                    className="input"
+                                    rows="3"
+                                    placeholder="Enter details (e.g. Lower back pain, asthma, past surgery, hypertension, or 'None')"
+                                    value={questionnaire.medicalHistory}
+                                    onChange={(e) => setQuestionnaire({ ...questionnaire, medicalHistory: e.target.value })}
+                                />
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                <div className="input-group">
+                                    <label style={{ fontWeight: '700', marginBottom: '0.4rem', display: 'block', color: 'var(--text-color, #1f2937)' }}>Emergency Contact Name</label>
+                                    <input
+                                        className="input"
+                                        type="text"
+                                        placeholder="e.g. John Doe (Spouse / Parent)"
+                                        value={questionnaire.emergencyContactName}
+                                        onChange={(e) => setQuestionnaire({ ...questionnaire, emergencyContactName: e.target.value })}
+                                    />
+                                </div>
+                                <div className="input-group">
+                                    <label style={{ fontWeight: '700', marginBottom: '0.4rem', display: 'block', color: 'var(--text-color, #1f2937)' }}>Emergency Phone</label>
+                                    <input
+                                        className="input"
+                                        type="text"
+                                        placeholder="e.g. 9876543210"
+                                        value={questionnaire.emergencyContactPhone}
+                                        onChange={(e) => setQuestionnaire({ ...questionnaire, emergencyContactPhone: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="input-group">
+                                <label style={{ fontWeight: '700', marginBottom: '0.4rem', display: 'block', color: 'var(--text-color, #1f2937)' }}>Q6. Specific Fitness Remarks & Coach Instructions (Text Box)</label>
+                                <textarea
+                                    className="input"
+                                    rows="2"
+                                    placeholder="Any specific instructions, target weight, or special trainer notes..."
+                                    value={questionnaire.specialNotes}
+                                    onChange={(e) => setQuestionnaire({ ...questionnaire, specialNotes: e.target.value })}
+                                />
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Wizard Navigation & Action Buttons */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', marginTop: '1.75rem' }}>
+                        {editingMember ? (
+                            <button
+                                type="button"
+                                className="btn btn-primary"
+                                style={{ width: '100%' }}
+                                onClick={(e) => handleSubmit(e)}
+                            >
+                                Update Member Details
+                            </button>
+                        ) : (
+                            <>
+                                {wizardStep > 1 && (
+                                    <button
+                                        type="button"
+                                        className="btn btn-secondary"
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setWizardStep(prev => prev - 1);
+                                        }}
+                                    >
+                                        ◀ Back
+                                    </button>
+                                )}
+
+                                {wizardStep < 3 ? (
+                                    <button
+                                        type="button"
+                                        className="btn btn-primary"
+                                        style={{ marginLeft: 'auto' }}
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            if (!formData.name || !formData.phone || !formData.planId) {
+                                                alert('Please fill in Member Name, Phone Number, and select a Subscription Plan first.');
+                                                return;
+                                            }
+                                            setWizardStep(prev => prev + 1);
+                                        }}
+                                    >
+                                        Next: {wizardStep === 1 ? 'Fitness Questionnaire ▶' : 'Medical Details ▶'}
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        className="btn btn-primary"
+                                        style={{ marginLeft: 'auto' }}
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            handleSubmit(e);
+                                        }}
+                                    >
+                                        Submit Registration ✅
+                                    </button>
+                                )}
+                            </>
                         )}
                     </div>
-                    <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1.5rem' }}>{editingMember ? 'Update Member' : 'Register Member'}</button>
                 </form>
             </Modal>
 
@@ -681,23 +1081,33 @@ const Members = () => {
                         {/* Financials & Subscription Plan */}
                         <div style={{ background: 'var(--card-bg, #2D251C)', border: '1px solid var(--border-color, #3A3025)', borderRadius: '12px', padding: '1.5rem' }}>
                             <h4 style={{ fontSize: '1rem', color: 'var(--primary)', marginBottom: '1rem', marginTop: 0 }}>Subscription & Financial Summary</h4>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
                                 <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px' }}>
                                     <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>Current Plan</span>
                                     <strong style={{ fontSize: '0.95rem', color: '#fff' }}>{auditData.member.currentPlan ? auditData.member.currentPlan.name : 'No active plan'}</strong>
                                 </div>
                                 <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px' }}>
-                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>Plan Price</span>
-                                    <strong style={{ fontSize: '1.1rem', color: '#fff' }}>₹{auditData.member.financials.planPrice}</strong>
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>Catalogue Price</span>
+                                    <strong style={{ fontSize: '1.05rem', color: '#fff' }}>₹{auditData.member.financials.catalogPrice || auditData.member.financials.planPrice}</strong>
+                                </div>
+                                {auditData.member.financials.discountAmount > 0 && (
+                                    <div style={{ background: 'rgba(16,185,129,0.05)', padding: '0.75rem', borderRadius: '8px', border: '1px solid rgba(16,185,129,0.2)' }}>
+                                        <span style={{ fontSize: '0.75rem', color: '#10b981', display: 'block' }}>Discount Given</span>
+                                        <strong style={{ fontSize: '1.05rem', color: '#10b981' }}>-₹{auditData.member.financials.discountAmount}</strong>
+                                    </div>
+                                )}
+                                <div style={{ background: 'rgba(245,158,11,0.05)', padding: '0.75rem', borderRadius: '8px', border: '1px solid rgba(245,158,11,0.2)' }}>
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--primary, #f59e0b)', display: 'block' }}>Net Agreed Fee</span>
+                                    <strong style={{ fontSize: '1.1rem', color: 'var(--primary, #f59e0b)' }}>₹{auditData.member.financials.planPrice}</strong>
                                 </div>
                                 <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px' }}>
                                     <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>Total Paid</span>
-                                    <strong style={{ fontSize: '1.1rem', color: '#2E7D32' }}>₹{auditData.member.financials.paidAmount}</strong>
+                                    <strong style={{ fontSize: '1.1rem', color: '#10b981' }}>₹{auditData.member.financials.paidAmount}</strong>
                                 </div>
-                                <div style={{ background: auditData.member.financials.pendingAmount > 0 ? 'rgba(198,40,40,0.1)' : 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px', border: auditData.member.financials.pendingAmount > 0 ? '1px solid #C62828' : 'none' }}>
-                                    <span style={{ fontSize: '0.75rem', color: auditData.member.financials.pendingAmount > 0 ? '#ff8a80' : 'var(--text-secondary)', display: 'block' }}>Pending Balance</span>
-                                    <strong style={{ fontSize: '1.1rem', color: auditData.member.financials.pendingAmount > 0 ? '#C62828' : '#2E7D32' }}>
-                                        ₹{auditData.member.financials.pendingAmount}
+                                <div style={{ background: auditData.member.financials.pendingAmount > 0 ? 'rgba(198,40,40,0.1)' : 'rgba(16,185,129,0.05)', padding: '0.75rem', borderRadius: '8px', border: auditData.member.financials.pendingAmount > 0 ? '1px solid #C62828' : '1px solid rgba(16,185,129,0.2)' }}>
+                                    <span style={{ fontSize: '0.75rem', color: auditData.member.financials.pendingAmount > 0 ? '#ff8a80' : '#10b981', display: 'block' }}>Pending Balance</span>
+                                    <strong style={{ fontSize: '1.1rem', color: auditData.member.financials.pendingAmount > 0 ? '#C62828' : '#10b981' }}>
+                                        {auditData.member.financials.pendingAmount > 0 ? `₹${auditData.member.financials.pendingAmount} Due` : '₹0 Settled'}
                                     </strong>
                                 </div>
                             </div>
@@ -775,6 +1185,79 @@ const Members = () => {
                             </div>
                         )}
 
+                        {/* Member Fitness, Diet & Health Profile */}
+                        {(() => {
+                            const assessmentLog = auditData.auditLogs?.find(l => l.action === 'MEMBER_ASSESSMENT');
+                            let parsed = {
+                                fitnessGoal: 'Fat Loss & Toning',
+                                experienceLevel: 'Beginner (< 6 mos)',
+                                workoutFrequency: '3-4 Days / Week',
+                                dietPreference: 'Vegetarian',
+                                medicalHistory: 'None declared',
+                                emergencyContact: 'None provided',
+                                specialNotes: 'Standard fitness orientation & onboarding routine'
+                            };
+
+                            if (assessmentLog?.details) {
+                                const d = assessmentLog.details;
+                                const goalMatch = d.match(/Goal:\s*([^|]+)/i);
+                                const expMatch = d.match(/Experience:\s*([^|]+)/i);
+                                const freqMatch = d.match(/Frequency:\s*([^|]+)/i);
+                                const dietMatch = d.match(/Diet:\s*([^|]+)/i);
+                                const medMatch = d.match(/Medical:\s*([^|]+)/i);
+                                const emergMatch = d.match(/Emergency:\s*([^|]+)/i);
+                                const notesMatch = d.match(/Notes:\s*(.+)$/i);
+
+                                if (goalMatch) parsed.fitnessGoal = goalMatch[1].trim();
+                                if (expMatch) parsed.experienceLevel = expMatch[1].trim();
+                                if (freqMatch) parsed.workoutFrequency = freqMatch[1].trim();
+                                if (dietMatch) parsed.dietPreference = dietMatch[1].trim();
+                                if (medMatch) parsed.medicalHistory = medMatch[1].trim();
+                                if (emergMatch) parsed.emergencyContact = emergMatch[1].trim();
+                                if (notesMatch) parsed.specialNotes = notesMatch[1].trim();
+                            }
+
+                            return (
+                                <div style={{ background: 'var(--card-bg, #2D251C)', border: '1px solid var(--border-color, #3A3025)', borderRadius: '12px', padding: '1.5rem' }}>
+                                    <h4 style={{ fontSize: '1rem', color: 'var(--primary)', marginBottom: '1rem', marginTop: 0 }}>
+                                        🥗 Member Lifestyle, Diet & Health Profile
+                                    </h4>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.85rem' }}>
+                                        <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px' }}>
+                                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>🥗 Diet & Nutrition</span>
+                                            <strong style={{ fontSize: '0.95rem', color: '#10b981' }}>{parsed.dietPreference}</strong>
+                                        </div>
+                                        <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px' }}>
+                                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>🔥 Primary Fitness Goal</span>
+                                            <strong style={{ fontSize: '0.95rem', color: '#fff' }}>{parsed.fitnessGoal}</strong>
+                                        </div>
+                                        <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px' }}>
+                                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>🏋️ Training Experience</span>
+                                            <strong style={{ fontSize: '0.95rem', color: '#fff' }}>{parsed.experienceLevel}</strong>
+                                        </div>
+                                        <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px' }}>
+                                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>📅 Workout Frequency</span>
+                                            <strong style={{ fontSize: '0.95rem', color: '#fff' }}>{parsed.workoutFrequency}</strong>
+                                        </div>
+                                        <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px' }}>
+                                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>🩺 Medical / Injuries</span>
+                                            <strong style={{ fontSize: '0.92rem', color: '#fff' }}>{parsed.medicalHistory}</strong>
+                                        </div>
+                                        <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px' }}>
+                                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>🚨 Emergency Contact</span>
+                                            <strong style={{ fontSize: '0.92rem', color: '#fff' }}>{parsed.emergencyContact}</strong>
+                                        </div>
+                                    </div>
+                                    {parsed.specialNotes && (
+                                        <div style={{ marginTop: '0.85rem', padding: '0.65rem 0.85rem', background: 'rgba(240,160,32,0.04)', borderRadius: '8px', borderLeft: '3px solid var(--primary)' }}>
+                                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>📝 Coach Remarks & Instructions:</span>
+                                            <p style={{ fontSize: '0.85rem', color: '#fff', margin: '0.2rem 0 0 0' }}>{parsed.specialNotes}</p>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
+
                         {/* Comprehensive Audit Logs */}
                         <div style={{ background: 'var(--card-bg, #2D251C)', border: '1px solid var(--border-color, #3A3025)', borderRadius: '12px', padding: '1.5rem' }}>
                             <h4 style={{ fontSize: '1rem', color: 'var(--primary)', marginBottom: '1rem', marginTop: 0 }}>Comprehensive Action Audit Logs</h4>
@@ -800,12 +1283,22 @@ const Members = () => {
             </Modal>
 
             {/* Renew Plan Modal */}
-            <Modal isOpen={!!renewMemberData} onClose={() => setRenewMemberData(null)} title={`🔄 Renew Membership: ${renewMemberData?.name}`}>
+            <Modal isOpen={!!renewMemberData} onClose={() => setRenewMemberData(null)} title={`🔄 Upgrade / Renew Plan: ${renewMemberData?.name}`}>
                 <form onSubmit={async (e) => {
                     e.preventDefault();
                     setSubmittingAction(true);
                     try {
-                        await API.post(`/members/${renewMemberData._id}/renew`, renewForm);
+                        const selected = plans.find(p => p._id === renewForm.planId);
+                        const catalogPrice = selected ? selected.price : 0;
+                        const disc = Math.max(0, Number(renewForm.discount) || 0);
+                        const finalPrice = Math.max(0, catalogPrice - disc);
+
+                        await API.post(`/members/${renewMemberData._id}/renew`, {
+                            ...renewForm,
+                            discount: disc,
+                            finalPrice,
+                            paidAmount: Number(renewForm.paidAmount) || 0
+                        });
                         setRenewMemberData(null);
                         fetchData();
                     } catch (err) {
@@ -815,16 +1308,19 @@ const Members = () => {
                     }
                 }}>
                     <div className="input-group">
-                        <label>Renewal Plan *</label>
+                        <label>Select Plan *</label>
                         <select
                             className="input"
                             value={renewForm.planId}
                             onChange={(e) => {
                                 const selected = plans.find(p => p._id === e.target.value);
+                                const catPrice = selected ? selected.price : 0;
+                                const disc = Number(renewForm.discount) || 0;
+                                const net = Math.max(0, catPrice - disc);
                                 setRenewForm({
                                     ...renewForm,
                                     planId: e.target.value,
-                                    paidAmount: selected ? selected.price : renewForm.paidAmount
+                                    paidAmount: net
                                 });
                             }}
                             required
@@ -836,15 +1332,77 @@ const Members = () => {
                         </select>
                     </div>
 
-                    <div className="input-group">
-                        <label>Amount Paid Now (₹)</label>
-                        <input
-                            className="input"
-                            type="number"
-                            value={renewForm.paidAmount}
-                            onChange={(e) => setRenewForm({ ...renewForm, paidAmount: e.target.value })}
-                            placeholder="Amount collected"
-                        />
+                    {renewForm.planId && (
+                        (() => {
+                            const selected = plans.find(p => p._id === renewForm.planId);
+                            const catPrice = selected ? Number(selected.price) : 0;
+                            const disc = Math.max(0, Number(renewForm.discount) || 0);
+                            const net = Math.max(0, catPrice - disc);
+                            const paid = Math.max(0, Number(renewForm.paidAmount) || 0);
+                            const pending = Math.max(0, net - paid);
+
+                            return (
+                                <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '1rem', marginBottom: '1.25rem' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                                        <div>
+                                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>Catalogue Price</span>
+                                            <strong style={{ fontSize: '1rem', color: '#fff' }}>₹{catPrice}</strong>
+                                        </div>
+                                        <div>
+                                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>Discount Applied</span>
+                                            <strong style={{ fontSize: '1rem', color: disc > 0 ? '#10b981' : '#fff' }}>-₹{disc}</strong>
+                                        </div>
+                                        <div>
+                                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>Net Agreed Fee</span>
+                                            <strong style={{ fontSize: '1.1rem', color: 'var(--primary, #f59e0b)' }}>₹{net}</strong>
+                                        </div>
+                                        <div>
+                                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>Pending Balance</span>
+                                            <strong style={{ fontSize: '1rem', color: pending > 0 ? '#ef4444' : '#10b981' }}>
+                                                {pending > 0 ? `₹${pending} Due` : '₹0 Settled'}
+                                            </strong>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })()
+                    )}
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                        <div className="input-group">
+                            <label>Manual Discount (₹)</label>
+                            <input
+                                className="input"
+                                type="number"
+                                min="0"
+                                value={renewForm.discount || ''}
+                                onChange={(e) => {
+                                    const discVal = Math.max(0, Number(e.target.value) || 0);
+                                    const selected = plans.find(p => p._id === renewForm.planId);
+                                    const catPrice = selected ? Number(selected.price) : 0;
+                                    const net = Math.max(0, catPrice - discVal);
+                                    setRenewForm({
+                                        ...renewForm,
+                                        discount: e.target.value,
+                                        paidAmount: net
+                                    });
+                                }}
+                                placeholder="0 (No discount)"
+                            />
+                        </div>
+
+                        <div className="input-group">
+                            <label>Amount Paid Now (₹) *</label>
+                            <input
+                                className="input"
+                                type="number"
+                                min="0"
+                                value={renewForm.paidAmount}
+                                onChange={(e) => setRenewForm({ ...renewForm, paidAmount: e.target.value })}
+                                placeholder="Amount collected"
+                                required
+                            />
+                        </div>
                     </div>
 
                     <div className="input-group">
@@ -862,7 +1420,7 @@ const Members = () => {
                     </div>
 
                     <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1.5rem' }} disabled={submittingAction}>
-                        {submittingAction ? 'Processing Renewal...' : 'Confirm Plan Renewal'}
+                        {submittingAction ? 'Processing Plan Upgrade...' : 'Confirm Plan Upgrade / Renewal'}
                     </button>
                 </form>
             </Modal>

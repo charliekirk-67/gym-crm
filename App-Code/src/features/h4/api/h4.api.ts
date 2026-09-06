@@ -114,13 +114,41 @@ export const useH4Payments = () =>
     staleTime: 60_000,
   });
 
+// ─── Digital Pass (Rotating TOTP QR & PIN) ──────────────────────────────────
+export interface H4DigitalPass {
+  success: boolean;
+  member: {
+    id: string;
+    name: string;
+    phone?: string;
+    status?: string;
+    gymId?: string;
+    branchId?: string | null;
+  };
+  memberId: string;
+  token: string;
+  pin: string;
+  expiresInSeconds: number;
+  qrData: string;
+}
+
+export const useH4DigitalPass = () =>
+  useQuery<H4DigitalPass>({
+    queryKey: ['h4', 'digital-pass'],
+    queryFn: async () => {
+      const { data } = await API_CLIENT.get('/member-portal/digital-pass');
+      return data;
+    },
+    refetchInterval: 45_000, // Refresh automatically before token expires
+  });
+
 // ─── Check-in Mutation ────────────────────────────────────────────────────────
 export const useH4CheckIn = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (payload?: { gymId?: string; branchId?: string; qrCode?: string }) => {
       const { data } = await API_CLIENT.post('/member-portal/sessions/check-in', {
-        gymId: payload?.gymId || '327d37e7-f978-43a9-82ef-e6c4a4dc3c5d',
+        gymId: payload?.gymId || 'HOME_GYM',
         branchId: payload?.branchId,
         qrCode: payload?.qrCode || 'H4_GYM_STANDARD_QR',
       });
@@ -147,14 +175,18 @@ export interface GymClassItem {
   maxSeats: number;
   seatsAvailable: number;
   isBooked: boolean;
+  bookingStatus?: string | null;
+  branchName?: string;
+  branchAddress?: string;
   imageUrl?: string;
 }
 
-export const useH4Classes = () =>
+export const useH4Classes = (allBranches: boolean = false) =>
   useQuery<GymClassItem[]>({
-    queryKey: H4_KEYS.classes,
+    queryKey: [...H4_KEYS.classes, allBranches ? 'all' : 'branch'],
     queryFn: async () => {
-      const { data } = await API_CLIENT.get('/member-portal/classes');
+      const url = allBranches ? '/member-portal/classes?allBranches=true' : '/member-portal/classes';
+      const { data } = await API_CLIENT.get(url);
       return Array.isArray(data) ? data : data?.data ?? [];
     },
     staleTime: 30_000,
